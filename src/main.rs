@@ -1,7 +1,8 @@
 use axum::{
+    body::Body,
     extract::State,
     http::StatusCode,
-    response::{IntoResponse, Response, sse::{Event, Sse}},
+    response::{IntoResponse, Response},
     routing::{get, post},
     Json, Router,
 };
@@ -133,7 +134,7 @@ struct ChatRequest {
 struct Message {
     #[allow(dead_code)]
     role: String,
-    content: MessageContent,
+    content: Option<MessageContent>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -159,6 +160,15 @@ impl MessageContent {
     }
 }
 
+impl Message {
+    fn text(&self) -> String {
+        match &self.content {
+            Some(c) => c.as_text(),
+            None => String::new(),
+        }
+    }
+}
+
 #[derive(Debug, Deserialize, Clone)]
 #[serde(tag = "type")]
 enum ContentPart {
@@ -180,7 +190,7 @@ enum ContentPart {
 fn select_tier<'a>(tiers: &'a [Tier], messages: &[Message]) -> (&'a Tier, String) {
     let full_text: String = messages
         .iter()
-        .map(|m| m.content.as_text())
+        .map(|m| m.text())
         .collect::<Vec<_>>()
         .join(" ");
     let lower = full_text.to_lowercase();
@@ -283,12 +293,20 @@ async fn forward_request(
 
     if stream {
         let byte_stream = resp.bytes_stream();
-        let sse_stream = byte_stream.map(|chunk| {
-            let bytes = chunk.unwrap_or_default();
-            let text = String::from_utf8_lossy(&bytes).to_string();
-            Ok::<_, std::convert::Infallible>(Event::default().data(text))
-        });
-        Ok(Sse::new(sse_stream).into_response())
+        let body = Body::from_stream(
+            byte_stream.map(|result| {
+                result.map_err(|e| {
+                    std::io::Error::new(std::io::ErrorKind::Other, e.to_string())
+                })
+            })
+        );
+        let response = Response::builder()
+            .header("Content-Type", "text/event-stream")
+            .header("Cache-Control", "no-cache")
+            .header("Connection", "keep-alive")
+            .body(body)
+            .unwrap();
+        Ok(response)
     } else {
         let text = resp.text().await?;
         Ok(Json(serde_json::from_str::<serde_json::Value>(&text)?).into_response())
@@ -299,6 +317,25 @@ async fn forward_request(
 
 async fn health() -> &'static str {
     "OK — iziRouter"
+}
+
+async fn list_models(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
+    let models: Vec<serde_json::Value> = state
+        .config
+        .tiers
+        .iter()
+        .map(|t| {
+            serde_json::json!({
+                "id": t.model,
+                "object": "model",
+                "owned_by": "izi-router",
+            })
+        })
+        .collect();
+    Json(serde_json::json!({
+        "object": "list",
+        "data": models,
+    }))
 }
 
 async fn chat_completions(
@@ -382,6 +419,7 @@ async fn main() -> anyhow::Result<()> {
 
     let app = Router::new()
         .route("/health", get(health))
+        .route("/v1/models", get(list_models))
         .route("/v1/chat/completions", post(chat_completions))
         .with_state(Arc::clone(&state));
 
