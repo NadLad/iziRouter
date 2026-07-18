@@ -81,6 +81,38 @@ If score ≥ `threshold` → **complex** model. Otherwise → **simple** model.
  performance tradeoffs"
 ```
 
+#### Customizing Keywords — `keywords.yaml`
+
+The technical keywords, question words, and code markers used for scoring are loaded from a separate YAML file. This file is **trilingual** by default (French, English, Arabic) and fully configurable:
+
+```yaml
+# keywords.yaml — RouterCrabs Complexity Scoring Keywords
+
+code_markers:
+  - "```"
+  - "fn "
+  - "class "
+  - "SELECT "
+  # ...
+
+technical_keywords:
+  - "explique"     # FR — explain
+  - "explain"      # EN
+  - "اشرح"         # AR
+  - "algorithme"   # FR
+  - "algorithm"    # EN
+  - "خوارزمية"     # AR
+  # ...
+
+question_words:
+  - "pourquoi"     # FR
+  - "why"          # EN
+  - "لماذا"        # AR
+  # ...
+```
+
+If the file is missing or a section is empty, built-in defaults are used. Edit the file and restart the service — no recompilation needed.
+
 ### 3. Full Algorithm (hybrid)
 
 ```
@@ -96,6 +128,8 @@ If score ≥ `threshold` → **complex** model. Otherwise → **simple** model.
 
 ```yaml
 port: 8001
+# host: "0.0.0.0"       # uncomment to bind to LAN
+# keywords_path: "keywords.yaml"  # custom scoring keyword file
 
 # ── Domain tiers (keywords) ──────────────────────────────
 tiers:
@@ -123,6 +157,14 @@ fallback:
     api_base: "https://api.deepseek.com"
     api_key: "${DEEPSEEK_API_KEY}"
 ```
+
+### Global Fields
+
+| Field | Required | Default | Description |
+|---|---|---|---|
+| `port` | ❌ | `8001` | Listening port |
+| `host` | ❌ | `127.0.0.1` | Bind address (`0.0.0.0` = LAN) |
+| `keywords_path` | ❌ | `keywords.yaml` | Path to scoring keywords file |
 
 ### Tier Fields
 
@@ -182,11 +224,11 @@ RUST_LOG=debug cargo run --release
 ## Usage as a Rust Library
 
 ```rust
-use router_crabs::{TiersConfig, Message, select_tier, score_complexity, forward_request};
+use router_crabs::{TiersConfig, Message, ScoringKeywords, select_tier, score_complexity, forward_request};
 
 let config = TiersConfig::load("tiers.yaml")?;
 let (tier, reason) = select_tier(&config, &messages);
-let complexity = score_complexity(&messages);
+let complexity = score_complexity(&messages, &config.keywords);
 ```
 
 ---

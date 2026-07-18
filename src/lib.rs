@@ -73,6 +73,169 @@ use axum::{
     Json,
 };
 
+// ── Complexity Scoring Keywords ────────────────────────────────────────
+
+/// Raw scoring keywords deserialized from `keywords.yaml`.
+#[derive(Debug, Deserialize)]
+struct RawScoringKeywords {
+    code_markers: Option<Vec<String>>,
+    technical_keywords: Option<Vec<String>>,
+    question_words: Option<Vec<String>>,
+}
+
+/// Complexity scoring keywords loaded from a YAML file.
+/// Falls back to built-in defaults when the file is missing or a section is empty.
+#[derive(Debug, Clone)]
+pub struct ScoringKeywords {
+    /// Code markers (e.g. ```, fn , class , SELECT )
+    pub code_markers: Vec<String>,
+    /// Technical vocabulary indicating complexity
+    pub technical_keywords: Vec<String>,
+    /// Question words used to detect open-ended prompts
+    pub question_words: Vec<String>,
+}
+
+fn default_code_markers() -> Vec<String> {
+    vec![
+        "```".into(), "fn ".into(), "pub fn".into(), "async fn".into(),
+        "def ".into(), "class ".into(), "import ".into(), "package ".into(),
+        "#include".into(), "impl ".into(), "struct ".into(), "enum ".into(),
+        "trait ".into(), "let mut".into(), "const ".into(), "var ".into(),
+        "function".into(), "export".into(), "require".into(),
+        "SELECT ".into(), "INSERT ".into(), "UPDATE ".into(), "DELETE ".into(),
+    ]
+}
+
+fn default_technical_keywords() -> Vec<String> {
+    vec![
+        // ── French ──
+        "explique".into(), "analyse".into(), "compare".into(), "pourquoi".into(),
+        "comment".into(), "architecture".into(), "design pattern".into(),
+        "complexité".into(), "optimise".into(), "optimisation".into(),
+        "algorithme".into(), "sécurité".into(), "debug".into(), "thread".into(),
+        "concurrent".into(), "parallèle".into(), "mémoire".into(), "cache".into(),
+        "distribué".into(), "microservice".into(), "kubernetes".into(),
+        "benchmark".into(), "tradeoff".into(), "trade-off".into(),
+        "meilleure pratique".into(), "différence entre".into(),
+        "implémente".into(), "configure".into(), "déploie".into(),
+        "compile".into(), "refactorise".into(), "abstrait".into(),
+        "hérite".into(), "polymorphisme".into(), "encapsule".into(),
+        "middleware".into(), "endpoint".into(), "authentification".into(),
+        "autorisation".into(), "chiffre".into(), "déchiffre".into(),
+        "certificat".into(), "protocole".into(), "latence".into(),
+        "scalabilité".into(), "résilience".into(), "transaction".into(),
+        "index".into(), "requête".into(), "schéma".into(), "normalise".into(),
+        "migre".into(), "test unitaire".into(), "mock".into(), "stub".into(),
+        "intégration".into(), "pipeline".into(), "conteneur".into(),
+        "orchestre".into(), "monitor".into(), "alerte".into(),
+        "sauvegarde".into(), "restaure".into(), "framework".into(),
+        // ── English ──
+        "explain".into(), "analyze".into(), "compare".into(), "why".into(),
+        "how".into(), "architecture".into(), "design pattern".into(),
+        "complexity".into(), "optimize".into(), "optimization".into(),
+        "algorithm".into(), "security".into(), "debug".into(), "thread".into(),
+        "concurrent".into(), "parallel".into(), "memory".into(), "cache".into(),
+        "distributed".into(), "microservice".into(), "kubernetes".into(),
+        "benchmark".into(), "tradeoff".into(), "trade-off".into(),
+        "best practice".into(), "difference between".into(),
+        "implement".into(), "configure".into(), "deploy".into(), "compile".into(),
+        "refactor".into(), "abstract".into(), "inherit".into(),
+        "polymorphism".into(), "encapsulate".into(), "middleware".into(),
+        "endpoint".into(), "authentication".into(), "authorization".into(),
+        "encrypt".into(), "decrypt".into(), "certificate".into(),
+        "protocol".into(), "latency".into(), "scalability".into(),
+        "resilience".into(), "transaction".into(), "index".into(),
+        "query".into(), "schema".into(), "normalize".into(), "migrate".into(),
+        "unit test".into(), "mock".into(), "stub".into(), "integration".into(),
+        "pipeline".into(), "container".into(), "orchestrate".into(),
+        "monitor".into(), "alert".into(), "backup".into(), "restore".into(),
+        "framework".into(),
+        // ── Arabic ──
+        "اشرح".into(), "حلل".into(), "قارن".into(), "لماذا".into(),
+        "كيف".into(), "معمارية".into(), "نمط تصميم".into(), "تعقيد".into(),
+        "حسّن".into(), "تحسين".into(), "خوارزمية".into(), "أمان".into(),
+        "أمن".into(), "تصحيح".into(), "خيط".into(), "تزامن".into(),
+        "متزامن".into(), "متوازي".into(), "ذاكرة".into(), "تخزين مؤقت".into(),
+        "موزع".into(), "توزيع".into(), "خدمة مصغرة".into(), "كوبرنتيس".into(),
+        "مقارنة".into(), "أفضل ممارسة".into(), "فرق بين".into(),
+        "نفذ".into(), "تنفيذ".into(), "إعداد".into(), "انشر".into(),
+        "نشر".into(), "ترجم".into(), "ترجمة".into(), "إعادة هيكلة".into(),
+        "تجريد".into(), "وراثة".into(), "تعدد أشكال".into(), "تغليف".into(),
+        "وسيط".into(), "نقطة نهاية".into(), "مصادقة".into(), "تفويض".into(),
+        "تشفير".into(), "فك تشفير".into(), "شهادة".into(), "بروتوكول".into(),
+        "كمون".into(), "قابلية توسع".into(), "مرونة".into(), "معاملة".into(),
+        "فهرس".into(), "استعلام".into(), "مخطط".into(), "هجرة".into(),
+        "قاعدة بيانات".into(), "اختبار وحدة".into(), "خط أنابيب".into(),
+        "حاوية".into(), "راقب".into(), "مراقبة".into(), "سجل".into(),
+        "تنبيه".into(), "نسخ احتياطي".into(), "استعادة".into(), "إطار عمل".into(),
+    ]
+}
+
+fn default_question_words() -> Vec<String> {
+    vec![
+        // ── French ──
+        "pourquoi".into(), "comment".into(), "qu'est-ce que".into(),
+        "quelle est".into(), "peux-tu".into(), "quel est".into(),
+        "que".into(), "qui".into(), "où".into(), "quand".into(), "lequel".into(),
+        // ── English ──
+        "how".into(), "why".into(), "what is".into(), "can you".into(),
+        "what".into(), "who".into(), "where".into(), "when".into(), "which".into(),
+        // ── Arabic ──
+        "لماذا".into(), "كيف".into(), "ما هو".into(), "هل يمكنك".into(),
+        "ما".into(), "من".into(), "أين".into(), "متى".into(), "أي".into(),
+    ]
+}
+
+impl Default for ScoringKeywords {
+    fn default() -> Self {
+        Self {
+            code_markers: default_code_markers(),
+            technical_keywords: default_technical_keywords(),
+            question_words: default_question_words(),
+        }
+    }
+}
+
+impl ScoringKeywords {
+    /// Loads scoring keywords from a YAML file.
+    ///
+    /// Falls back to built-in defaults if the file is missing,
+    /// the YAML is invalid, or a section is empty.
+    pub fn load(path: &str) -> Self {
+        let yaml = match std::fs::read_to_string(path) {
+            Ok(y) => y,
+            Err(_) => {
+                tracing::warn!(
+                    "Keywords file '{}' not found — using built-in defaults",
+                    path
+                );
+                return Self::default();
+            }
+        };
+        let raw: RawScoringKeywords = match serde_yaml::from_str(&yaml) {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::warn!(
+                    "Invalid keywords YAML '{}': {} — using built-in defaults",
+                    path, e
+                );
+                return Self::default();
+            }
+        };
+        Self {
+            code_markers: raw.code_markers
+                .filter(|v| !v.is_empty())
+                .unwrap_or_else(default_code_markers),
+            technical_keywords: raw.technical_keywords
+                .filter(|v| !v.is_empty())
+                .unwrap_or_else(default_technical_keywords),
+            question_words: raw.question_words
+                .filter(|v| !v.is_empty())
+                .unwrap_or_else(default_question_words),
+        }
+    }
+}
+
 // ── YAML Configuration ──────────────────────────────────────────────────
 
 /// Raw tier, deserialized from YAML.
@@ -135,6 +298,9 @@ pub struct RawConfig {
     /// When set, clients must send an `X-RouterCrabs-Key` header with this value.
     #[serde(default)]
     pub proxy_key: Option<String>,
+    /// Path to the complexity scoring keywords file (default: `keywords.yaml`)
+    #[serde(default = "default_keywords_path")]
+    pub keywords_path: String,
     #[serde(default)]
     pub tiers: Vec<RawTier>,
     pub fallback: Option<RawFallbackConfig>,
@@ -142,6 +308,7 @@ pub struct RawConfig {
 
 fn default_port() -> u16 { 8001 }
 fn default_host() -> String { "127.0.0.1".into() }
+fn default_keywords_path() -> String { "keywords.yaml".into() }
 
 // ── Resolved tier (environment variables interpolated) ───────────────────
 
@@ -271,6 +438,8 @@ pub struct TiersConfig {
     pub tiers: Vec<Tier>,
     /// Complexity-based routing configuration
     pub fallback: Option<FallbackConfig>,
+    /// Complexity scoring keywords (loaded from `keywords_path`)
+    pub keywords: ScoringKeywords,
 }
 
 impl TiersConfig {
@@ -321,8 +490,9 @@ impl TiersConfig {
             .collect();
 
         let fallback = raw.fallback.map(FallbackConfig::from_raw);
+        let keywords = ScoringKeywords::load(&raw.keywords_path);
 
-        Ok(Self { port: raw.port, host: raw.host, proxy_key: raw.proxy_key, tiers, fallback })
+        Ok(Self { port: raw.port, host: raw.host, proxy_key: raw.proxy_key, tiers, fallback, keywords })
     }
 }
 
@@ -427,10 +597,17 @@ pub enum ContentPart {
 /// let score = score_complexity(&messages);
 /// assert!(score >= 3); // long prompt + technical → high score
 /// ```
-pub fn score_complexity(messages: &[Message]) -> u32 {
-    let full_text: String = messages.iter().map(|m| m.text()).collect::<Vec<_>>().join(" ");
-    let lower = full_text.to_lowercase();
-    let len = full_text.len();
+pub fn score_complexity(messages: &[Message], keywords: &ScoringKeywords) -> u32 {
+    // Only score the LAST user message — not the full conversation history.
+    // System prompts and history would otherwise inflate the score for every question.
+    let last_user_text = messages
+        .iter()
+        .rev()
+        .find(|m| m.role == "user")
+        .map(|m| m.text())
+        .unwrap_or_default();
+    let lower = last_user_text.to_lowercase();
+    let len = last_user_text.len();
 
     let mut score: u32 = 0;
 
@@ -444,12 +621,9 @@ pub fn score_complexity(messages: &[Message]) -> u32 {
     }
 
     // ── 2. Code presence ──────────────────
-    let code_markers = [
-        "```", "fn ", "def ", "class ", "import ", "package ",
-        "#include", "pub fn", "impl ", "struct ", "enum ",
-        "trait ", "async fn", "SELECT ", "INSERT ",
-    ];
-    let code_count = code_markers.iter().filter(|m| lower.contains(*m)).count();
+    let code_count = keywords.code_markers.iter()
+        .filter(|m| lower.contains(m.as_str()))
+        .count();
     if code_count >= 3 {
         score += 3;
     } else if code_count >= 1 {
@@ -457,20 +631,9 @@ pub fn score_complexity(messages: &[Message]) -> u32 {
     }
 
     // ── 3. Technical keywords ─────────────
-    let tech_keywords = [
-        // French
-        "explique", "analyse", "compare", "pourquoi", "comment",
-        "architecture", "design pattern", "complexité",
-        "optimise", "optimisation", "algorithme", "sécurité",
-        "debug", "thread", "concurrent", "parallèle",
-        "mémoire", "cache", "distribué", "microservice",
-        "kubernetes", "benchmark", "tradeoff", "trade-off",
-        "meilleure pratique", "différence entre",
-        // English
-        "explain", "analyze", "why", "architecture", "algorithm",
-        "optimize", "debug", "concurrent", "security", "distributed",
-    ];
-    let tech_count = tech_keywords.iter().filter(|kw| lower.contains(*kw)).count();
+    let tech_count = keywords.technical_keywords.iter()
+        .filter(|kw| lower.contains(kw.as_str()))
+        .count();
     if tech_count >= 4 {
         score += 3;
     } else if tech_count >= 2 {
@@ -492,12 +655,8 @@ pub fn score_complexity(messages: &[Message]) -> u32 {
     }
 
     // ── 5. Open-ended question ─────────────
-    let question_words = [
-        "pourquoi", "comment", "qu'est-ce que", "quelle est",
-        "peux-tu", "how", "why", "what is", "can you",
-    ];
-    let has_question = full_text.contains('?')
-        && question_words.iter().any(|w| lower.contains(w));
+    let has_question = (last_user_text.contains('?') || last_user_text.contains('؟'))
+        && keywords.question_words.iter().any(|w| lower.contains(w.as_str()));
     if has_question {
         score += 1;
     }
@@ -608,7 +767,7 @@ pub fn select_tier<'a>(
 
     // ── Phase 2: complexity (fallback) ────
     if let Some(ref fb) = config.fallback {
-        let complexity = score_complexity(messages);
+        let complexity = score_complexity(messages, &config.keywords);
         if complexity >= fb.threshold {
             let tier = Tier {
                 name: "complex-fallback".into(),
